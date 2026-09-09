@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import {
   IconX,
@@ -12,8 +12,14 @@ import {
   IconStore,
   IconUser,
   IconMoon,
-  IconSun
+  IconSun,
+  IconRefresh
 } from '../icons/Icons'
+import {
+  onSyncStatusChange,
+  syncAllToPocketBase,
+  type SyncStatus
+} from '../../services/syncService'
 import type { NavTab } from './Navigation'
 
 interface NavigationDrawerProps {
@@ -32,6 +38,22 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   onOpenShiftModal
 }) => {
   const { storeSetting, currentUser, activeShift, logout, theme, toggleTheme } = useAuth()
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isSyncing: false,
+    lastSyncTime: localStorage.getItem('kasir_last_sync') || null,
+    unsyncedCount: 0,
+    error: null
+  })
+
+  useEffect(() => {
+    const unsub = onSyncStatusChange((st) => setSyncStatus(st))
+    return unsub
+  }, [])
+
+  const handleSyncNow = async () => {
+    if (syncStatus.isSyncing) return
+    await syncAllToPocketBase()
+  }
 
   if (!isOpen) return null
 
@@ -127,6 +149,37 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
               style={{ marginTop: '0.25rem', width: '100%', fontSize: '0.78rem' }}
             >
               {activeShift ? 'Tutup Buku / Shift' : 'Buka Shift Sekarang'}
+            </button>
+          </div>
+
+          {/* Cloud Sync Status (Mobile) */}
+          <div style={{
+            marginTop: '0.5rem',
+            padding: '0.65rem 0.75rem',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'var(--bg-app)',
+            border: '1px solid var(--border-subtle)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.5rem'
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '0.76rem', fontWeight: 600 }}>PocketBase Cloud</div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                {syncStatus.unsyncedCount > 0 ? `${syncStatus.unsyncedCount} belum sinkron` : 'Data telah sinkron'}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSyncNow}
+              disabled={syncStatus.isSyncing}
+              className="btn-secondary btn-sm"
+              style={{ padding: '0.25rem 0.55rem', fontSize: '0.72rem', height: '28px', gap: '0.3rem' }}
+            >
+              <IconRefresh size={12} className={syncStatus.isSyncing ? 'spin' : ''} />
+              <span>{syncStatus.isSyncing ? 'Sync...' : 'Sinkron'}</span>
             </button>
           </div>
         </div>

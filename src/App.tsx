@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { Header } from './components/layout/Header'
 import { Navigation, type NavTab } from './components/layout/Navigation'
@@ -13,12 +13,23 @@ import { ExpensesView } from './components/expenses/ExpensesView'
 import { ReportsView } from './components/reports/ReportsView'
 import { SettingsView } from './components/settings/SettingsView'
 import { IconStore } from './components/icons/Icons'
+import { initRealtimeSubscriptions, getUnsyncedCount, pullFromPocketBase } from './services/syncService'
 
 const AppContent: React.FC = () => {
   const { currentUser, isLoading, isInitialSetup } = useAuth()
   const [activeTab, setActiveTab] = useState<NavTab>('pos')
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+
+  useEffect(() => {
+    if (currentUser) {
+      initRealtimeSubscriptions()
+      getUnsyncedCount()
+      if (navigator.onLine) {
+        pullFromPocketBase().catch(() => {})
+      }
+    }
+  }, [currentUser])
 
   if (isLoading) {
     return (

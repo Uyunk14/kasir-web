@@ -12,6 +12,15 @@ import {
 } from '../icons/Icons'
 import { useAuth } from '../../context/AuthContext'
 import { generateId } from '../../utils/id'
+import { POCKETBASE_SCHEMA_JSON } from '../../services/pocketbaseSchema'
+import {
+  syncAllToPocketBase,
+  pullFromPocketBase,
+  getUnsyncedCount,
+  onSyncStatusChange,
+  type SyncStatus
+} from '../../services/syncService'
+import { updatePocketBaseUrl } from '../../services/pocketbase'
 
 export const SettingsView: React.FC = () => {
   const { storeSetting } = useAuth()
@@ -32,6 +41,17 @@ export const SettingsView: React.FC = () => {
 
   // PocketBase Sync Configuration
   const [pbUrl, setPbUrl] = useState(localStorage.getItem('kasir_pb_url') || 'https://kasir.sayunk.id')
+  const [isTestingPb, setIsTestingPb] = useState(false)
+  const [pbHealthStatus, setPbHealthStatus] = useState<{ ok: boolean; message: string } | null>(null)
+  const [isSyncingManual, setIsSyncingManual] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [copiedSchema, setCopiedSchema] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isSyncing: false,
+    lastSyncTime: localStorage.getItem('kasir_last_sync') || null,
+    unsyncedCount: 0,
+    error: null
+  })
 
   const loadSettingsData = async () => {
     const uList = await db.users.toArray()
@@ -47,7 +67,70 @@ export const SettingsView: React.FC = () => {
 
   useEffect(() => {
     loadSettingsData()
+    getUnsyncedCount()
+    const unsub = onSyncStatusChange((st) => setSyncStatus(st))
+    return unsub
   }, [])
+
+  // Uji koneksi ke PocketBase
+  const handleTestConnection = async () => {
+    setIsTestingPb(true)
+    setPbHealthStatus(null)
+    try {
+      const cleanUrl = pbUrl.trim().replace(/\/+$/, '')
+      const res = await fetch(`${cleanUrl}/api/health`)
+      const data = await res.json()
+      if (res.ok && data.code === 200) {
+        setPbHealthStatus({ ok: true, message: 'Server PocketBase aktif & terhubung (HTTP 200 OK)!' })
+      } else {
+        setPbHealthStatus({ ok: false, message: `Server merespon: HTTP ${res.status}` })
+      }
+    } catch (err: any) {
+      setPbHealthStatus({
+        ok: false,
+        message: `Tidak dapat terhubung ke server: ${err.message || 'Periksa URL atau koneksi internet'}`
+      })
+    } finally {
+      setIsTestingPb(false)
+    }
+  }
+
+  // Sinkronisasi manual
+  const handleManualSyncNow = async () => {
+    setIsSyncingManual(true)
+    setSyncResult(null)
+    try {
+      updatePocketBaseUrl(pbUrl.trim())
+      const pushRes = await syncAllToPocketBase()
+      const pullRes = await pullFromPocketBase()
+      await getUnsyncedCount()
+      if (pushRes.success) {
+        setSyncResult({
+          ok: true,
+          message: `Sinkronisasi berhasil! ${pullRes.count ? `${pullRes.count} produk diselaraskan.` : 'Semua data lokal telah sinkron dengan server.'}`
+        })
+      } else {
+        setSyncResult({
+          ok: false,
+          message: pushRes.message || 'Gagal menyinkronkan data. Pastikan koleksi telah di-import di PocketBase.'
+        })
+      }
+    } catch (err: any) {
+      setSyncResult({
+        ok: false,
+        message: err.message || 'Terjadi kesalahan saat proses sinkronisasi.'
+      })
+    } finally {
+      setIsSyncingManual(false)
+    }
+  }
+
+  // Salin skema JSON ke clipboard
+  const handleCopySchema = () => {
+    navigator.clipboard.writeText(POCKETBASE_SCHEMA_JSON)
+    setCopiedSchema(true)
+    setTimeout(() => setCopiedSchema(false), 3000)
+  }
 
   // Simpan Pengaturan Toko
   const handleSaveStore = async (e: React.FormEvent) => {
@@ -272,40 +355,147 @@ export const SettingsView: React.FC = () => {
 
       {/* PocketBase Cloud VPS Integration */}
       <div className="card">
-        <h3 style={{ fontSize: '1.05rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <IconRefresh size={18} /> Integrasi Backend PocketBase & VPS
-        </h3>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-          Aplikasi berjalan offline-first menggunakan IndexedDB di browser kasir. Saat terhubung ke server PocketBase di VPS CloudPanel, data akan tersinkronisasi otomatis secara dua arah secara real-time.
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <IconRefresh size={18} /> Integrasi Backend PocketBase & VPS CloudPanel
+          </h3>
+          <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>
+            {pbUrl.includes('kasir.sayunk.id') ? 'kasir.sayunk.id (Terhubung)' : 'Custom Backend'}
+          </span>
+        </div>
+
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+          Kasir berjalan <strong>offline-first</strong> di browser Anda. Saat terhubung ke server PocketBase di VPS CloudPanel, seluruh data produk, kasir, transaksi belanja, dan pembukuan hutang otomatis tersimpan secara aman di database cloud.
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {/* Form URL & Test Koneksi */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem' }}>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem' }}>
               URL Server PocketBase (Domain VPS CloudPanel)
             </label>
-            <input
-              type="url"
-              className="mono"
-              placeholder="https://kasir.sayunk.id"
-              value={pbUrl}
-              onChange={e => setPbUrl(e.target.value)}
-            />
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <input
+                type="url"
+                className="mono"
+                style={{ flex: 1, minWidth: '240px' }}
+                placeholder="https://kasir.sayunk.id"
+                value={pbUrl}
+                onChange={e => setPbUrl(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={isTestingPb}
+                className="btn-secondary"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                {isTestingPb ? 'Menguji...' : 'Uji Koneksi Server'}
+              </button>
+            </div>
+
+            {/* Indikator Hasil Tes Koneksi */}
+            {pbHealthStatus && (
+              <div style={{
+                marginTop: '0.5rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.82rem',
+                backgroundColor: pbHealthStatus.ok ? 'var(--status-success-bg)' : 'var(--status-danger-bg)',
+                color: pbHealthStatus.ok ? 'var(--status-success-text)' : 'var(--status-danger-text)',
+                border: `1px solid ${pbHealthStatus.ok ? 'var(--status-success-border)' : 'var(--status-danger-border)'}`
+              }}>
+                {pbHealthStatus.message}
+              </div>
+            )}
           </div>
 
+          {/* Status & Kontrol Sinkronisasi */}
           <div style={{
-            padding: '0.85rem',
+            padding: '1rem',
             backgroundColor: 'var(--bg-surface-subtle)',
             borderRadius: 'var(--radius-md)',
-            fontSize: '0.82rem',
-            color: 'var(--text-secondary)'
+            border: '1px solid var(--border-default)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.75rem'
           }}>
-            <p style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Panduan Deploy VPS CloudPanel:</p>
-            <ol style={{ paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-              <li>Unduh binary PocketBase di VPS Anda.</li>
-              <li>Jalankan PocketBase dengan perintah <code>./pocketbase serve --http="127.0.0.1:8090"</code>.</li>
-              <li>Arahkan reverse proxy Nginx di CloudPanel untuk domain <code>kasir.sayunk.id</code> ke port <code>8090</code>.</li>
-              <li>Folder <code>pb_public/</code> PocketBase akan otomatis menyajikan build statis frontend PWA ini.</li>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>Status Sinkronisasi Data</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Data belum sinkron: <strong>{syncStatus.unsyncedCount} entri</strong> | Sinkron terakhir: {syncStatus.lastSyncTime || 'Belum pernah'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleManualSyncNow}
+                disabled={isSyncingManual}
+                className="btn-primary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <IconRefresh size={15} className={isSyncingManual ? 'spin' : ''} />
+                <span>{isSyncingManual ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}</span>
+              </button>
+            </div>
+
+            {syncResult && (
+              <div style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.8rem',
+                backgroundColor: syncResult.ok ? 'var(--status-success-bg)' : 'var(--status-warning-bg)',
+                color: syncResult.ok ? 'var(--status-success-text)' : 'var(--status-warning-text)'
+              }}>
+                {syncResult.message}
+              </div>
+            )}
+          </div>
+
+          {/* Panduan 1-Click Import Skema Koleksi ke PocketBase */}
+          <div style={{
+            padding: '1rem',
+            backgroundColor: 'var(--bg-app)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-default)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+                Import Skema Database ke PocketBase (Cukup Sekali)
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={handleCopySchema}
+                  className={copiedSchema ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}
+                  style={{ fontSize: '0.78rem' }}
+                >
+                  <IconCheck size={14} />
+                  <span>{copiedSchema ? 'Tersalin ke Clipboard!' : 'Salin Skema (JSON)'}</span>
+                </button>
+                <a
+                  href={`${pbUrl.replace(/\/+$/, '')}/_/`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-secondary btn-sm"
+                  style={{ fontSize: '0.78rem', textDecoration: 'none' }}
+                >
+                  Buka PocketBase Admin
+                </a>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+              Agar PocketBase dapat menyimpan koleksi (produk, transaksi kasir, hutang, laporan), import skema dengan cara:
+            </p>
+
+            <ol style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <li>Klik tombol <strong>Salin Skema (JSON)</strong> di atas.</li>
+              <li>Klik <strong>Buka PocketBase Admin</strong> (<code>https://kasir.sayunk.id/_/</code>).</li>
+              <li>Di PocketBase Admin, klik ikon <strong>Settings (Gear di kiri bawah)</strong> &rarr; pilih <strong>Sync</strong> (atau <em>Import collections</em>).</li>
+              <li>Paste (Tempel) teks JSON yang sudah disalin ke kolom input.</li>
+              <li>Klik <strong>Review</strong> lalu <strong>Confirm and import</strong>. Selesai!</li>
             </ol>
           </div>
         </div>

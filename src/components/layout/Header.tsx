@@ -8,8 +8,14 @@ import {
   IconSun,
   IconLogOut,
   IconWifi,
-  IconWifiOff
+  IconWifiOff,
+  IconRefresh
 } from '../icons/Icons'
+import {
+  onSyncStatusChange,
+  syncAllToPocketBase,
+  type SyncStatus
+} from '../../services/syncService'
 
 interface HeaderProps {
   onOpenShiftModal: () => void
@@ -19,17 +25,30 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onOpenShiftModal, onToggleDrawer }) => {
   const { storeSetting, currentUser, activeShift, logout, theme, toggleTheme } = useAuth()
   const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isSyncing: false,
+    lastSyncTime: localStorage.getItem('kasir_last_sync') || null,
+    unsyncedCount: 0,
+    error: null
+  })
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
     const handleOffline = () => setIsOnline(false)
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    const unsub = onSyncStatusChange((st) => setSyncStatus(st))
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      unsub()
     }
   }, [])
+
+  const handleSyncNow = async () => {
+    if (syncStatus.isSyncing) return
+    await syncAllToPocketBase()
+  }
 
   const handleLogout = () => {
     if (confirm('Apakah Anda yakin ingin keluar (Logout)?')) {
@@ -134,6 +153,28 @@ export const Header: React.FC<HeaderProps> = ({ onOpenShiftModal, onToggleDrawer
           {isOnline ? <IconWifi size={13} /> : <IconWifiOff size={13} />}
           <span style={{ fontSize: '0.7rem' }}>{isOnline ? 'Online' : 'Offline'}</span>
         </div>
+
+        {/* Tombol Sinkron PocketBase Cloud (Desktop) */}
+        <button
+          type="button"
+          onClick={handleSyncNow}
+          disabled={syncStatus.isSyncing || !isOnline}
+          className="btn-ghost mobile-hide"
+          style={{
+            height: '28px',
+            padding: '0 0.55rem',
+            fontSize: '0.72rem',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-default)',
+            gap: '0.35rem',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+          title={syncStatus.isSyncing ? 'Sedang sinkronisasi data...' : `PocketBase: ${syncStatus.unsyncedCount} belum sinkron. Klik untuk sync.`}
+        >
+          <IconRefresh size={12} className={syncStatus.isSyncing ? 'spin' : ''} />
+          <span>{syncStatus.isSyncing ? 'Sync...' : syncStatus.unsyncedCount > 0 ? `${syncStatus.unsyncedCount} Sync` : 'Synced'}</span>
+        </button>
 
         {/* Info Pengguna / Kasir (Desktop) */}
         <div
