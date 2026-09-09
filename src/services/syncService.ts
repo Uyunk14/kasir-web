@@ -194,7 +194,45 @@ export async function pullFromPocketBase(): Promise<{ success: boolean; count?: 
   if (!navigator.onLine) return { success: false }
 
   try {
-    // Tarik produk dari PocketBase
+    // 1. Tarik kategori
+    try {
+      const remoteCategories = await pb.collection('categories').getFullList({ requestKey: null })
+      for (const rc of remoteCategories) {
+        const local = await db.categories.where('name').equals(rc.name).first()
+        if (!local) {
+          await db.categories.add({
+            id: rc.id,
+            name: rc.name,
+            synced: true
+          })
+        }
+      }
+    } catch (e) {
+      console.warn('Pull categories error:', e)
+    }
+
+    // 2. Tarik pelanggan
+    try {
+      const remoteCustomers = await pb.collection('customers').getFullList({ requestKey: null })
+      for (const cust of remoteCustomers) {
+        const local = await db.customers.where('name').equals(cust.name).first()
+        if (!local) {
+          await db.customers.add({
+            id: cust.id,
+            name: cust.name,
+            phone: cust.phone || '',
+            address: cust.address || '',
+            total_debt: cust.total_debt || 0,
+            credit_limit: cust.credit_limit || 0,
+            synced: true
+          })
+        }
+      }
+    } catch (e) {
+      console.warn('Pull customers error:', e)
+    }
+
+    // 3. Tarik produk dari PocketBase
     const remoteProducts = await pb.collection('products').getFullList({
       sort: '-created',
       requestKey: null

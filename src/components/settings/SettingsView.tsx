@@ -23,7 +23,7 @@ import {
 import { updatePocketBaseUrl } from '../../services/pocketbase'
 
 export const SettingsView: React.FC = () => {
-  const { storeSetting } = useAuth()
+  const { storeSetting, currentUser, syncAccountToCloud } = useAuth()
   
   // Store Settings Form
   const [storeName, setStoreName] = useState(storeSetting?.store_name || '')
@@ -31,6 +31,11 @@ export const SettingsView: React.FC = () => {
   const [address, setAddress] = useState(storeSetting?.address || '')
   const [footer, setFooter] = useState(storeSetting?.receipt_footer || '')
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Cloud Account Sync (Multi-Device)
+  const [cloudPassword, setCloudPassword] = useState('')
+  const [isSyncingAccount, setIsSyncingAccount] = useState(false)
+  const [cloudAccountResult, setCloudAccountResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   // Cashiers List
   const [users, setUsers] = useState<User[]>([])
@@ -122,6 +127,40 @@ export const SettingsView: React.FC = () => {
       })
     } finally {
       setIsSyncingManual(false)
+    }
+  }
+
+  // Daftarkan/Hubungkan akun lokal PC ke Cloud PocketBase
+  const handleSyncAccountToCloud = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (cloudPassword.length < 8) {
+      setCloudAccountResult({
+        ok: false,
+        message: 'Kata sandi minimal 8 karakter sesuai aturan keamanan PocketBase Cloud.'
+      })
+      return
+    }
+
+    setIsSyncingAccount(true)
+    setCloudAccountResult(null)
+    try {
+      const res = await syncAccountToCloud(cloudPassword)
+      setCloudAccountResult({
+        ok: res.success,
+        message: res.message
+      })
+      if (res.success) {
+        setCloudPassword('')
+        loadSettingsData()
+        getUnsyncedCount()
+      }
+    } catch (err: any) {
+      setCloudAccountResult({
+        ok: false,
+        message: err.message || 'Gagal menyinkronkan akun ke cloud.'
+      })
+    } finally {
+      setIsSyncingAccount(false)
     }
   }
 
@@ -351,6 +390,82 @@ export const SettingsView: React.FC = () => {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Akun Cloud & Akses Antar Perangkat (PC ke HP) */}
+      <div className="card" style={{ border: '1px solid var(--border-focus)', position: 'relative' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <IconUser size={18} /> Akun Cloud & Akses Antar Perangkat (HP / Laptop)
+          </h3>
+          <span className={`badge ${currentUser?.synced ? 'badge-primary' : 'badge-warning'}`}>
+            {currentUser?.synced ? 'Terhubung ke Cloud' : 'Lokal PC Saja (Belum Terhubung)'}
+          </span>
+        </div>
+
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+          Agar Anda bisa <strong>login di HP atau perangkat lain</strong> menggunakan akun toko yang dibuat di PC ini, akun kasir harus didaftarkan ke server cloud PocketBase (<code>https://kasir.sayunk.id</code>).
+        </p>
+
+        <div style={{
+          padding: '0.85rem 1rem',
+          backgroundColor: 'var(--bg-surface-subtle)',
+          borderRadius: 'var(--radius-md)',
+          marginBottom: '1rem',
+          fontSize: '0.85rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.35rem'
+        }}>
+          <div><strong>Nama Pemilik:</strong> {currentUser?.name || '-'}</div>
+          <div><strong>Email Akun:</strong> {currentUser?.email || '-'}</div>
+          <div><strong>Status Cloud:</strong> {currentUser?.synced ? 'Aktif (Siap login di HP)' : 'Belum aktif — masukkan kata sandi di bawah untuk menghubungkan'}</div>
+        </div>
+
+        <form onSubmit={handleSyncAccountToCloud} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+              Kata Sandi Akun Cloud (Minimal 8 Karakter)
+            </label>
+            <input
+              type="password"
+              placeholder="Masukkan kata sandi (min. 8 karakter) untuk login di HP"
+              value={cloudPassword}
+              onChange={e => setCloudPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+              Kata sandi ini yang akan Anda gunakan untuk masuk di HP bersama email <code>{currentUser?.email}</code>.
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.25rem' }}>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={isSyncingAccount}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <IconRefresh size={16} className={isSyncingAccount ? 'spin' : ''} />
+              <span>{isSyncingAccount ? 'Menghubungkan ke Cloud...' : 'Hubungkan Akun ke Cloud & Sinkron Data'}</span>
+            </button>
+          </div>
+        </form>
+
+        {cloudAccountResult && (
+          <div style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem 1rem',
+            borderRadius: 'var(--radius-md)',
+            fontSize: '0.85rem',
+            backgroundColor: cloudAccountResult.ok ? 'var(--status-success-bg)' : 'var(--status-danger-bg)',
+            color: cloudAccountResult.ok ? 'var(--status-success-text)' : 'var(--status-danger-text)',
+            border: `1px solid ${cloudAccountResult.ok ? 'var(--status-success-border)' : 'var(--status-danger-border)'}`
+          }}>
+            {cloudAccountResult.message}
+          </div>
+        )}
       </div>
 
       {/* PocketBase Cloud VPS Integration */}

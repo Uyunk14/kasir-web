@@ -35,8 +35,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onSwitchToLogin }) => {
       setError('Email valid wajib diisi')
       return
     }
-    if (password.length < 6) {
-      setError('Kata sandi minimal 6 karakter')
+    if (password.length < 8) {
+      setError('Kata sandi minimal 8 karakter (standar keamanan PocketBase cloud)')
       return
     }
     if (pin.length !== 6 || !/^\d+$/.test(pin)) {
@@ -269,7 +269,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onSwitchToLogin }) => {
                   </label>
                   <input
                     type="password"
-                    placeholder="Minimal 6 karakter"
+                    placeholder="Minimal 8 karakter"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     required

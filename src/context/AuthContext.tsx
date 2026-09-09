@@ -3,6 +3,7 @@ import { db } from '../db/db'
 import type { User, StoreSetting, Shift } from '../types'
 import { generateId } from '../utils/id'
 import { pb } from '../services/pocketbase'
+import { syncAllToPocketBase, pullFromPocketBase } from '../services/syncService'
 
 interface AuthContextType {
   currentUser: User | null
@@ -25,6 +26,7 @@ interface AuthContextType {
   ) => Promise<void>
   loginWithPin: (pin: string) => Promise<{ success: boolean; message?: string }>
   loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; message?: string }>
+  syncAccountToCloud: (password: string) => Promise<{ success: boolean; message: string }>
   logout: () => void
   openCashierShift: (openingCash: number) => Promise<Shift>
   closeCashierShift: (closingCash: number, notes?: string) => Promise<Shift>
@@ -171,6 +173,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           passwordConfirm: password,
           name: ownerName
         }, { requestKey: null })
+        await pb.collection('users').authWithPassword(email.trim().toLowerCase(), password)
       }
     } catch (pbErr) {
       console.warn('PocketBase owner registration:', pbErr)
@@ -209,12 +212,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsInitialSetup(false)
         localStorage.setItem('kasir_active_user_id', user.id)
         await loadShiftForUser(user.id)
+
+        // Login juga ke PocketBase jika online agar auth token aktif
+        if (navigator.onLine) {
+          pb.collection('users').authWithPassword(cleanEmail, password).catch(() => {})
+        }
         return { success: true }
       }
       return { success: false, message: 'Kata sandi atau PIN salah.' }
     }
 
-    // 2. Jika tidak ada di lokal (misal baru buka di perangkat baru / VPS), login ke server PocketBase
+    // 2. Jika tidak ada di lokal (misal baru buka di perangkat baru / HP), login ke server PocketBase cloud
     try {
       if (navigator.onLine) {
         const authData = await pb.collection('users').authWithPassword(cleanEmail, password)
@@ -238,7 +246,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!currentStore) {
             const newStore: StoreSetting = {
               id: generateId(),
-              store_name: 'Kasir Toko',
+              store_name: `${newUser.name}'s Toko`,
               owner_name: newUser.name,
               phone: '',
               address: '',
@@ -254,6 +262,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setCurrentUser(newUser)
           setIsInitialSetup(false)
           localStorage.setItem('kasir_active_user_id', newUser.id)
+
+          // Tarik semua data produk, kategori, pelanggan langsung ke perangkat baru (HP)
+          pullFromPocketBase().catch(e => console.warn('Auto pull on login error:', e))
           return { success: true }
         }
       } else {
@@ -261,10 +272,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (pbErr: any) {
       console.warn('PocketBase cloud login:', pbErr)
-      return { success: false, message: pbErr.message || 'Email atau kata sandi tidak cocok di PocketBase.' }
+      return {
+        success: false,
+        message: 'Email atau kata sandi tidak cocok di Cloud PocketBase. Jika akun dibuat di PC sebelumnya, pastikan akun sudah dihubungkan ke Cloud di menu Pengaturan Toko di PC, atau silakan "Daftar Toko Baru".'
+      }
     }
 
-    return { success: false, message: 'Email tidak ditemukan di lokal maupun server cloud. Silakan periksa kembali atau daftar baru.' }
+    return {
+      success: false,
+      message: 'Email tidak ditemukan di lokal maupun server cloud. Silakan periksa kembali atau daftar toko baru.'
+    }
+  }
+
+  // Daftarkan/hubungkan akun lokal yang sudah ada di PC ke PocketBase Cloud
+  const syncAccountToCloud = async (password: string): Promise<{ success: boolean; message: string }> => {
+    if (!currentUser) return { success: false, message: 'Belum ada pengguna yang login di perangkat ini.' }
+    if (password.length < 8) {
+      return { success: false, message: 'Kata sandi minimal 8 karakter sesuai standar PocketBase Cloud.' }
+    }
+    if (!navigator.onLine) {
+      return { success: false, message: 'Tidak ada koneksi internet. Pastikan PC terhubung ke internet.' }
+    }
+
+    const cleanEmail = currentUser.email.trim().toLowerCase()
+    try {
+      // 1. Coba daftarkan akun ke PocketBase jika belum ada
+      try {
+        await pb.collection('users').create({
+          email: cleanEmail,
+          password: password,
+          passwordConfirm: password,
+          name: currentUser.name
+        }, { requestKey: null })
+      } catch (createErr: any) {
+        console.log('PocketBase user creation info:', createErr?.message)
+      }
+
+      // 2. Lakukan login ke PocketBase untuk mengesahkan token auth
+      await pb.collection('users').authWithPassword(cleanEmail, password)
+
+      // 3. Perbarui hash sandi di database lokal dan tandai synced
+      const passHash = await hashSecret(password)
+      await db.users.update(currentUser.id, {
+        password_hash: passHash,
+        synced: true
+      })
+      setCurrentUser(prev => prev ? { ...prev, password_hash: passHash, synced: true } : null)
+
+      // 4. Sinkronkan seluruh data toko (kategori, produk, kasir, pelanggan, transaksi) ke PocketBase
+      await syncAllToPocketBase()
+
+      return {
+        success: true,
+        message: `Akun ${cleanEmail} berhasil terhubung ke Cloud PocketBase! Semua data produk dan toko telah disinkronkan. Sekarang Anda bisa login di HP dengan email dan kata sandi ini.`
+      }
+    } catch (err: any) {
+      console.error('syncAccountToCloud error:', err)
+      return {
+        success: false,
+        message: err.message || 'Gagal menghubungkan akun ke Cloud. Pastikan server PocketBase aktif.'
+      }
+    }
   }
 
   const logout = () => {
@@ -359,6 +427,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         registerStoreAndOwner,
         loginWithPin,
         loginWithEmail,
+        syncAccountToCloud,
         logout,
         openCashierShift,
         closeCashierShift,
