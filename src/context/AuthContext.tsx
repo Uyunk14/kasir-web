@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 import { db } from '../db/db'
 import type { User, StoreSetting, Shift } from '../types'
 import { generateId } from '../utils/id'
+import { pb } from '../services/pocketbase'
 
 interface AuthContextType {
   currentUser: User | null
@@ -9,6 +10,8 @@ interface AuthContextType {
   activeShift: Shift | null
   isLoading: boolean
   isInitialSetup: boolean
+  authScreenMode: 'login' | 'register'
+  setAuthScreenMode: (mode: 'login' | 'register') => void
   theme: 'light' | 'dark'
   toggleTheme: () => void
   registerStoreAndOwner: (
@@ -44,6 +47,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activeShift, setActiveShift] = useState<Shift | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isInitialSetup, setIsInitialSetup] = useState(false)
+  const [authScreenMode, setAuthScreenMode] = useState<'login' | 'register'>('login')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
 
   // Theme setup
@@ -74,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (storeCount === 0 || userCount === 0) {
           setIsInitialSetup(true)
+          setAuthScreenMode('login')
           setIsLoading(false)
           return
         }
@@ -157,6 +162,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await db.store_settings.add(newStore)
     await db.users.add(newOwner)
 
+    // Buat juga akun di PocketBase cloud jika sedang online
+    try {
+      if (navigator.onLine) {
+        await pb.collection('users').create({
+          email: email.trim().toLowerCase(),
+          password: password,
+          passwordConfirm: password,
+          name: ownerName
+        }, { requestKey: null })
+      }
+    } catch (pbErr) {
+      console.warn('PocketBase owner registration:', pbErr)
+    }
+
     setStoreSetting(newStore)
     setCurrentUser(newOwner)
     setIsInitialSetup(false)
@@ -178,21 +197,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   const loginWithEmail = async (email: string, password: string): Promise<{ success: boolean; message?: string }> => {
-    const user = await db.users.where('email').equals(email.trim().toLowerCase()).first()
-    if (!user) {
-      return { success: false, message: 'Email tidak ditemukan.' }
+    const cleanEmail = email.trim().toLowerCase()
+
+    // 1. Cek pengguna di database lokal (IndexedDB)
+    const user = await db.users.where('email').equals(cleanEmail).first()
+    if (user) {
+      const pinOrPassHash = await hashSecret(password)
+      const isValid = user.password_hash === pinOrPassHash || user.pin_hash === pinOrPassHash
+      if (isValid) {
+        setCurrentUser(user)
+        setIsInitialSetup(false)
+        localStorage.setItem('kasir_active_user_id', user.id)
+        await loadShiftForUser(user.id)
+        return { success: true }
+      }
+      return { success: false, message: 'Kata sandi atau PIN salah.' }
     }
 
-    const pinOrPassHash = await hashSecret(password)
-    const isValid = user.password_hash === pinOrPassHash || user.pin_hash === pinOrPassHash
-    if (!isValid) {
-      return { success: false, message: 'Sandi atau PIN salah.' }
+    // 2. Jika tidak ada di lokal (misal baru buka di perangkat baru / VPS), login ke server PocketBase
+    try {
+      if (navigator.onLine) {
+        const authData = await pb.collection('users').authWithPassword(cleanEmail, password)
+        if (authData && authData.record) {
+          const pbUser = authData.record
+          const passHash = await hashSecret(password)
+          const pinHash = await hashSecret('123456') // default PIN
+          const newUser: User = {
+            id: pbUser.id,
+            name: pbUser.name || cleanEmail.split('@')[0],
+            email: cleanEmail,
+            pin_hash: pinHash,
+            password_hash: passHash,
+            role: 'owner',
+            created_at: pbUser.created || new Date().toISOString(),
+            synced: true
+          }
+          await db.users.put(newUser)
+
+          let currentStore = await db.store_settings.toCollection().first()
+          if (!currentStore) {
+            const newStore: StoreSetting = {
+              id: generateId(),
+              store_name: 'Kasir Toko',
+              owner_name: newUser.name,
+              phone: '',
+              address: '',
+              receipt_footer: 'Terima kasih atas kunjungan Anda',
+              is_configured: true,
+              created_at: new Date().toISOString()
+            }
+            await db.store_settings.add(newStore)
+            currentStore = newStore
+          }
+
+          setStoreSetting(currentStore)
+          setCurrentUser(newUser)
+          setIsInitialSetup(false)
+          localStorage.setItem('kasir_active_user_id', newUser.id)
+          return { success: true }
+        }
+      } else {
+        return { success: false, message: 'Tidak ada koneksi internet untuk memeriksa akun di cloud.' }
+      }
+    } catch (pbErr: any) {
+      console.warn('PocketBase cloud login:', pbErr)
+      return { success: false, message: pbErr.message || 'Email atau kata sandi tidak cocok di PocketBase.' }
     }
 
-    setCurrentUser(user)
-    localStorage.setItem('kasir_active_user_id', user.id)
-    await loadShiftForUser(user.id)
-    return { success: true }
+    return { success: false, message: 'Email tidak ditemukan di lokal maupun server cloud. Silakan periksa kembali atau daftar baru.' }
   }
 
   const logout = () => {
@@ -280,6 +352,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeShift,
         isLoading,
         isInitialSetup,
+        authScreenMode,
+        setAuthScreenMode,
         theme,
         toggleTheme,
         registerStoreAndOwner,

@@ -16,7 +16,7 @@ import { IconStore } from './components/icons/Icons'
 import { initRealtimeSubscriptions, getUnsyncedCount, pullFromPocketBase } from './services/syncService'
 
 const AppContent: React.FC = () => {
-  const { currentUser, isLoading, isInitialSetup } = useAuth()
+  const { currentUser, isLoading, authScreenMode, setAuthScreenMode } = useAuth()
   const [activeTab, setActiveTab] = useState<NavTab>('pos')
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
@@ -59,14 +59,12 @@ const AppContent: React.FC = () => {
     )
   }
 
-  // First time onboarding setup
-  if (isInitialSetup) {
-    return <Onboarding />
-  }
-
-  // Login / Lock screen if not authenticated
+  // Not logged in: show Login or Register based on authScreenMode
   if (!currentUser) {
-    return <LoginScreen />
+    if (authScreenMode === 'register') {
+      return <Onboarding onSwitchToLogin={() => setAuthScreenMode('login')} />
+    }
+    return <LoginScreen onSwitchToRegister={() => setAuthScreenMode('register')} />
   }
 
   return (

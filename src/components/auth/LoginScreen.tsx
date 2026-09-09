@@ -1,16 +1,32 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { db } from '../../db/db'
 import { IconLock, IconUser, IconAlert, IconCheck, IconMoon, IconSun } from '../icons/Icons'
 
-export const LoginScreen: React.FC = () => {
+interface LoginScreenProps {
+  onSwitchToRegister?: () => void
+}
+
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onSwitchToRegister }) => {
   const { storeSetting, loginWithPin, loginWithEmail, theme, toggleTheme } = useAuth()
   
+  const [hasLocalUsers, setHasLocalUsers] = useState<boolean>(true)
   const [loginMode, setLoginMode] = useState<'pin' | 'email'>('pin')
   const [pin, setPin] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+
+  useEffect(() => {
+    db.users.count().then(count => {
+      const exists = count > 0
+      setHasLocalUsers(exists)
+      if (!exists) {
+        setLoginMode('email')
+      }
+    })
+  }, [])
 
   // PIN Keypad Handlers
   const handleKeyClick = (digit: string) => {
@@ -88,6 +104,52 @@ export const LoginScreen: React.FC = () => {
         boxShadow: 'var(--shadow-lg)',
         textAlign: 'center'
       }}>
+        {/* Switcher Tab: Masuk (Login) vs Daftar Toko */}
+        {onSwitchToRegister && (
+          <div style={{
+            display: 'flex',
+            backgroundColor: 'var(--bg-surface-subtle)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.3rem',
+            marginBottom: '1.5rem',
+            border: '1px solid var(--border-default)'
+          }}>
+            <button
+              type="button"
+              style={{
+                flex: 1,
+                padding: '0.55rem',
+                borderRadius: 'var(--radius-sm)',
+                border: 'none',
+                background: 'var(--accent-primary)',
+                color: 'var(--accent-primary-text)',
+                fontWeight: 600,
+                fontSize: '0.88rem',
+                cursor: 'pointer'
+              }}
+            >
+              Masuk (Login)
+            </button>
+            <button
+              type="button"
+              onClick={onSwitchToRegister}
+              style={{
+                flex: 1,
+                padding: '0.55rem',
+                borderRadius: 'var(--radius-sm)',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-secondary)',
+                fontWeight: 600,
+                fontSize: '0.88rem',
+                cursor: 'pointer'
+              }}
+            >
+              Daftar Toko Baru
+            </button>
+          </div>
+        )}
+
         {/* Store Name & Logo */}
         <div style={{
           display: 'inline-flex',
@@ -107,7 +169,11 @@ export const LoginScreen: React.FC = () => {
           {storeSetting?.store_name || 'Kasir Toko'}
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-          {loginMode === 'pin' ? 'Masukkan 6 Digit PIN Kasir' : 'Masuk dengan Email & Sandi'}
+          {!hasLocalUsers
+            ? 'Masuk dengan Email & Sandi Akun Anda'
+            : loginMode === 'pin'
+            ? 'Masukkan 6 Digit PIN Kasir'
+            : 'Masuk dengan Email & Sandi'}
         </p>
 
         {error && (
@@ -257,15 +323,39 @@ export const LoginScreen: React.FC = () => {
               {isLoading ? 'Memverifikasi...' : 'Masuk'}
             </button>
 
+            {hasLocalUsers && (
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                onClick={() => { setLoginMode('pin'); setError('') }}
+                style={{ width: '100%' }}
+              >
+                <IconLock size={16} /> Kembali ke Login PIN Kasir
+              </button>
+            )}
+          </form>
+        )}
+
+        {onSwitchToRegister && (
+          <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            Belum memiliki toko atau akun kasir?{' '}
             <button
               type="button"
-              className="btn-ghost btn-sm"
-              onClick={() => { setLoginMode('pin'); setError('') }}
-              style={{ width: '100%' }}
+              onClick={onSwitchToRegister}
+              style={{
+                fontWeight: 600,
+                color: 'var(--accent-primary)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                padding: 0,
+                fontSize: '0.85rem'
+              }}
             >
-              <IconLock size={16} /> Kembali ke Login PIN
+              Daftar Toko Baru
             </button>
-          </form>
+          </div>
         )}
       </div>
     </div>

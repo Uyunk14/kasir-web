@@ -2,7 +2,11 @@ import React, { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { IconStore, IconUser, IconCheck, IconAlert } from '../icons/Icons'
 
-export const Onboarding: React.FC = () => {
+interface OnboardingProps {
+  onSwitchToLogin: () => void
+}
+
+export const Onboarding: React.FC<OnboardingProps> = ({ onSwitchToLogin }) => {
   const { registerStoreAndOwner } = useAuth()
   
   const [storeName, setStoreName] = useState('')
@@ -74,6 +78,50 @@ export const Onboarding: React.FC = () => {
         padding: '2rem 2.25rem',
         boxShadow: 'var(--shadow-lg)'
       }}>
+        {/* Switcher Tab: Masuk (Login) vs Daftar Toko */}
+        <div style={{
+          display: 'flex',
+          backgroundColor: 'var(--bg-surface-subtle)',
+          borderRadius: 'var(--radius-md)',
+          padding: '0.3rem',
+          marginBottom: '1.5rem',
+          border: '1px solid var(--border-default)'
+        }}>
+          <button
+            type="button"
+            onClick={onSwitchToLogin}
+            style={{
+              flex: 1,
+              padding: '0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              fontWeight: 600,
+              fontSize: '0.88rem',
+              cursor: 'pointer'
+            }}
+          >
+            Masuk (Login)
+          </button>
+          <button
+            type="button"
+            style={{
+              flex: 1,
+              padding: '0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              background: 'var(--accent-primary)',
+              color: 'var(--accent-primary-text)',
+              fontWeight: 600,
+              fontSize: '0.88rem',
+              cursor: 'pointer'
+            }}
+          >
+            Daftar Toko Baru
+          </button>
+        </div>
+
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{
@@ -258,6 +306,26 @@ export const Onboarding: React.FC = () => {
             {isSubmitting ? 'Menyiapkan Toko...' : 'Mulai Menggunakan Kasir'}
           </button>
         </form>
+
+        <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+          Sudah memiliki akun atau toko?{' '}
+          <button
+            type="button"
+            onClick={onSwitchToLogin}
+            style={{
+              fontWeight: 600,
+              color: 'var(--accent-primary)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              padding: 0,
+              fontSize: '0.85rem'
+            }}
+          >
+            Masuk ke Kasir
+          </button>
+        </div>
       </div>
     </div>
   )
