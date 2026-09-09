@@ -361,3 +361,5 @@ export const IconWifiOff: React.FC<IconProps> = (props) => (
     <line x1="12" y1="20" x2="12.01" y2="20" />
   </IconBase>
 )
+
+

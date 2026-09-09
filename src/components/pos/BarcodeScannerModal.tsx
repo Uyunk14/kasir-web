@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { IconX, IconCameraSwitch, IconAlert, IconCheck } from '../icons/Icons'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
+import { IconX, IconCameraSwitch, IconAlert, IconCheck, IconCamera } from '../icons/Icons'
 
 interface BarcodeScannerModalProps {
   isOpen: boolean
   onClose: () => void
   onScanSuccess: (barcode: string) => void
+  title?: string
 }
 
 // Audio beep generator using Web Audio API
@@ -15,103 +17,121 @@ function playBeep() {
     const gain = audioCtx.createGain()
     osc.type = 'sine'
     osc.frequency.setValueAtTime(1400, audioCtx.currentTime)
-    gain.gain.setValueAtTime(0.2, audioCtx.currentTime)
+    gain.gain.setValueAtTime(0.25, audioCtx.currentTime)
     osc.connect(gain)
     gain.connect(audioCtx.destination)
     osc.start()
-    osc.stop(audioCtx.currentTime + 0.1)
+    osc.stop(audioCtx.currentTime + 0.12)
   } catch (e) {
-    // Ignore audio errors
+    // Ignore audio context errors
   }
 }
 
 export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   isOpen,
   onClose,
-  onScanSuccess
+  onScanSuccess,
+  title = 'Scan Barcode Kamera'
 }) => {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
   const [manualCode, setManualCode] = useState('')
   const [error, setError] = useState('')
-  const [isSupported, setIsSupported] = useState(true)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanIntervalRef = useRef<any>(null)
+  const [isInitializing, setIsInitializing] = useState(true)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const scannerContainerId = 'interactive-barcode-reader'
 
-  const stopCamera = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current)
-      scanIntervalRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop())
-      streamRef.current = null
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop()
+        }
+        scannerRef.current.clear()
+      } catch (e) {
+        console.warn('Stop scanner error:', e)
+      }
+      scannerRef.current = null
     }
   }
 
-  const startCamera = async (mode: 'environment' | 'user') => {
-    stopCamera()
+  const startScanner = async (mode: 'environment' | 'user') => {
+    setIsInitializing(true)
     setError('')
+
+    // Stop existing instance if any
+    await stopScanner()
+
+    // Wait a frame to ensure DOM container is mounted
+    await new Promise(resolve => setTimeout(resolve, 80))
+
+    const container = document.getElementById(scannerContainerId)
+    if (!container) {
+      setIsInitializing(false)
+      return
+    }
+
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Kamera tidak didukung di browser ini.')
-      }
+      const html5QrCode = new Html5Qrcode(scannerContainerId)
+      scannerRef.current = html5QrCode
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: mode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+      const config = {
+        fps: 15,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const width = Math.min(viewfinderWidth * 0.85, 320)
+          const height = Math.min(viewfinderHeight * 0.55, 180)
+          return { width: Math.floor(width), height: Math.floor(height) }
         },
-        audio: false
-      })
-
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
+        aspectRatio: 1.333333,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.QR_CODE
+        ]
       }
 
-      // Check if native BarcodeDetector API is supported
-      if ('BarcodeDetector' in window) {
-        const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'code_128', 'qr_code', 'upc_a', 'upc_e', 'code_39']
-        })
+      await html5QrCode.start(
+        { facingMode: mode },
+        config,
+        (decodedText) => {
+          playBeep()
+          stopScanner().then(() => {
+            onScanSuccess(decodedText)
+            onClose()
+          })
+        },
+        () => {
+          // Scan frame miss, normal behavior while scanning
+        }
+      )
 
-        scanIntervalRef.current = setInterval(async () => {
-          if (videoRef.current && videoRef.current.readyState >= 2) {
-            try {
-              const barcodes = await barcodeDetector.detect(videoRef.current)
-              if (barcodes.length > 0) {
-                const detectedCode = barcodes[0].rawValue
-                if (detectedCode) {
-                  playBeep()
-                  stopCamera()
-                  onScanSuccess(detectedCode)
-                  onClose()
-                }
-              }
-            } catch (err) {
-              // Ignore frame detection err
-            }
-          }
-        }, 300)
-      } else {
-        setIsSupported(false)
-      }
+      setIsInitializing(false)
     } catch (err: any) {
-      console.error('Camera access error:', err)
-      setError(err.message || 'Gagal mengakses kamera')
+      console.error('Html5Qrcode start error:', err)
+      setIsInitializing(false)
+      setError(
+        err?.message?.includes('Permission') || err?.name === 'NotAllowedError'
+          ? 'Izin akses kamera ditolak. Harap izinkan akses kamera di browser Anda.'
+          : 'Kamera tidak dapat diakses atau sedang digunakan oleh aplikasi lain. Anda dapat memasukkan kode barcode di bawah ini.'
+      )
     }
   }
 
   useEffect(() => {
     if (isOpen) {
-      startCamera(facingMode)
+      startScanner(facingMode)
     } else {
-      stopCamera()
+      stopScanner()
     }
-    return () => stopCamera()
+
+    return () => {
+      stopScanner()
+    }
   }, [isOpen, facingMode])
 
   const toggleFacingMode = () => {
@@ -122,10 +142,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     e.preventDefault()
     if (manualCode.trim()) {
       playBeep()
-      stopCamera()
-      onScanSuccess(manualCode.trim())
-      setManualCode('')
-      onClose()
+      stopScanner().then(() => {
+        onScanSuccess(manualCode.trim())
+        setManualCode('')
+        onClose()
+      })
     }
   }
 
@@ -136,7 +157,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       <div className="modal-content" style={{ maxWidth: '440px', overflow: 'hidden' }}>
         <div className="modal-header">
           <h3 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>Scan Barcode Kamera</span>
+            <IconCamera size={18} />
+            <span>{title}</span>
             <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>
               {facingMode === 'environment' ? 'Kamera Belakang' : 'Kamera Depan'}
             </span>
@@ -175,55 +197,52 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             <div style={{
               position: 'relative',
               width: '100%',
-              height: '240px',
-              backgroundColor: '#000',
+              minHeight: '260px',
+              backgroundColor: '#0a0a0c',
               borderRadius: 'var(--radius-lg)',
               overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
             }}>
-              <video
-                ref={videoRef}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                playsInline
-                muted
-              />
-              
-              {/* Scan target reticle overlay */}
-              <div style={{
-                position: 'absolute',
-                width: '70%',
-                height: '55%',
-                border: '2px solid rgba(255, 255, 255, 0.75)',
-                borderRadius: '12px',
-                boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.35)',
-                pointerEvents: 'none'
-              }}>
+              {isInitializing && (
                 <div style={{
                   position: 'absolute',
-                  top: '50%',
-                  left: 0,
-                  right: 0,
-                  height: '2px',
-                  backgroundColor: '#EF4444',
-                  boxShadow: '0 0 8px #EF4444'
-                }} />
-              </div>
+                  zIndex: 2,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  color: '#fff',
+                  fontSize: '0.85rem'
+                }}>
+                  <div className="spin" style={{ width: '24px', height: '24px', border: '3px solid #fff', borderTopColor: 'transparent', borderRadius: '50%' }} />
+                  <span>Membuka kamera...</span>
+                </div>
+              )}
+
+              {/* Viewport container for Html5Qrcode */}
+              <div
+                id={scannerContainerId}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: 'var(--radius-lg)',
+                  overflow: 'hidden'
+                }}
+              />
             </div>
           )}
 
-          {!isSupported && !error && (
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-              Catatan: Browser tidak memiliki API BarcodeDetector native. Anda dapat memasukkan kode barcode di bawah ini.
-            </p>
-          )}
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
+            Arahkan kamera ke barcode produk (EAN-13, UPC, Code 128, dll.) hingga terdengar bunyi beep.
+          </p>
 
           {/* Manual Barcode Input Fallback */}
           <form onSubmit={handleManualSubmit} style={{ display: 'flex', gap: '0.5rem' }}>
             <input
               type="text"
-              placeholder="Atau ketik barcode di sini..."
+              placeholder="Atau ketik angka barcode di sini..."
               className="mono"
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}

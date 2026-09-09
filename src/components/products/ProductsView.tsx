@@ -8,11 +8,13 @@ import {
   IconSearch,
   IconCheck,
   IconX,
-  IconRefresh
+  IconRefresh,
+  IconCamera
 } from '../icons/Icons'
 import { formatRupiah } from '../../utils/printer'
 import { generateId } from '../../utils/id'
 import { useAuth } from '../../context/AuthContext'
+import { BarcodeScannerModal } from '../pos/BarcodeScannerModal'
 
 export const ProductsView: React.FC = () => {
   const { currentUser } = useAuth()
@@ -22,6 +24,10 @@ export const ProductsView: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([])
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('all')
+
+  // Barcode Scanning State
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false)
+  const [scanTarget, setScanTarget] = useState<'form' | 'search'>('form')
 
   // Product Form Modal
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -59,6 +65,21 @@ export const ProductsView: React.FC = () => {
   useEffect(() => {
     loadData()
   }, [])
+
+  const handleScanSuccess = (scannedCode: string) => {
+    if (scanTarget === 'form') {
+      setFormBarcodes(prev => {
+        const currentList = prev.split(',').map(s => s.trim()).filter(Boolean)
+        if (!currentList.includes(scannedCode)) {
+          return currentList.length > 0 ? `${currentList.join(', ')}, ${scannedCode}` : scannedCode
+        }
+        return prev
+      })
+    } else {
+      setSearch(scannedCode)
+    }
+    setIsScanModalOpen(false)
+  }
 
   const handleOpenAdd = () => {
     setEditingProduct(null)
@@ -235,18 +256,33 @@ export const ProductsView: React.FC = () => {
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--border-default)'
       }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
-          <IconSearch
-            size={18}
-            style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
-          />
-          <input
-            type="text"
-            placeholder="Cari nama barang atau SKU..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ paddingLeft: '2.5rem' }}
-          />
+        <div style={{ position: 'relative', flex: 1, minWidth: '240px', display: 'flex', gap: '0.5rem' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <IconSearch
+              size={18}
+              style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+            />
+            <input
+              type="text"
+              placeholder="Cari nama barang, barcode, atau SKU..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ paddingLeft: '2.5rem', width: '100%' }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setScanTarget('search')
+              setIsScanModalOpen(true)
+            }}
+            className="btn-secondary"
+            title="Scan Barcode untuk mencari produk"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0 0.85rem', flexShrink: 0 }}
+          >
+            <IconCamera size={16} />
+            <span style={{ fontSize: '0.82rem' }}>Scan</span>
+          </button>
         </div>
 
         <div style={{ width: '200px' }}>
@@ -412,16 +448,43 @@ export const ProductsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.25rem' }}>
-                    Kode Barcode (Pisahkan koma jika lebih dari 1)
-                  </label>
-                  <input
-                    type="text"
-                    className="mono"
-                    placeholder="Contoh: 899123456789, 899987654321"
-                    value={formBarcodes}
-                    onChange={e => setFormBarcodes(e.target.value)}
-                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600 }}>
+                      Kode Barcode Produk
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanTarget('form')
+                        setIsScanModalOpen(true)
+                      }}
+                      className="btn-secondary btn-sm"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.8rem',
+                        borderRadius: 'var(--radius-md)'
+                      }}
+                    >
+                      <IconCamera size={15} />
+                      <span>Scan Barcode Kamera</span>
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      className="mono"
+                      placeholder="Scan atau ketik barcode (cth: 899123456789)"
+                      value={formBarcodes}
+                      onChange={e => setFormBarcodes(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                    Gunakan tombol <strong>Scan Barcode Kamera</strong> untuk memindai kemasan barang lewat kamera HP atau webcam PC. Bisa lebih dari 1 barcode (pisahkan koma).
+                  </span>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -653,6 +716,14 @@ export const ProductsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Barcode Scanner Modal for Camera */}
+      <BarcodeScannerModal
+        isOpen={isScanModalOpen}
+        onClose={() => setIsScanModalOpen(false)}
+        onScanSuccess={handleScanSuccess}
+        title={scanTarget === 'form' ? 'Scan Barcode Produk Baru' : 'Scan Barcode Cari Barang'}
+      />
     </div>
   )
 }
