@@ -16,6 +16,27 @@ import { generateId } from '../../utils/id'
 import { useAuth } from '../../context/AuthContext'
 import { BarcodeScannerModal } from '../pos/BarcodeScannerModal'
 
+// Format angka dengan pemisah ribuan titik (contoh: 15000 -> 15.000)
+function formatThousandInput(val: string | number): string {
+  if (val === '' || val === null || val === undefined) return ''
+  const digits = val.toString().replace(/\D/g, '')
+  if (!digits) return ''
+  return parseInt(digits, 10).toLocaleString('id-ID')
+}
+
+// Parse string berformat titik ribuan ke integer
+function parseThousandInput(val: string): number {
+  const digits = val.replace(/\D/g, '')
+  return parseInt(digits, 10) || 0
+}
+
+// Parse string stok (bisa desimal koma/titik untuk barang curah)
+function parseDecimalInput(val: string): number {
+  if (!val || !val.trim()) return 0
+  const normalized = val.replace(',', '.')
+  return parseFloat(normalized) || 0
+}
+
 export const ProductsView: React.FC = () => {
   const { currentUser } = useAuth()
   const isOwner = currentUser?.role === 'owner'
@@ -38,15 +59,15 @@ export const ProductsView: React.FC = () => {
   const [formCatId, setFormCatId] = useState('')
   const [formUnit, setFormUnit] = useState('pcs')
   const [formIsBulk, setFormIsBulk] = useState(false)
-  const [formCostPrice, setFormCostPrice] = useState<number>(0)
-  const [formSellPrice, setFormSellPrice] = useState<number>(0)
-  const [formWholesalePrice, setFormWholesalePrice] = useState<number>(0)
-  const [formStock, setFormStock] = useState<number>(0)
-  const [formMinStock, setFormMinStock] = useState<number>(5)
+  const [costPriceInput, setCostPriceInput] = useState<string>('')
+  const [sellPriceInput, setSellPriceInput] = useState<string>('')
+  const [wholesalePriceInput, setWholesalePriceInput] = useState<string>('')
+  const [stockInput, setStockInput] = useState<string>('')
+  const [minStockInput, setMinStockInput] = useState<string>('5')
 
   // Stock Opname Modal
   const [opnameProduct, setOpnameProduct] = useState<Product | null>(null)
-  const [opnameNewStock, setOpnameNewStock] = useState<number>(0)
+  const [opnameStockInput, setOpnameStockInput] = useState<string>('')
   const [opnameReason, setOpnameReason] = useState<string>('Stock Opname Fisik')
 
   // Category Manager Modal
@@ -89,11 +110,11 @@ export const ProductsView: React.FC = () => {
     setFormCatId(categories[0]?.id || '')
     setFormUnit('pcs')
     setFormIsBulk(false)
-    setFormCostPrice(0)
-    setFormSellPrice(0)
-    setFormWholesalePrice(0)
-    setFormStock(0)
-    setFormMinStock(5)
+    setCostPriceInput('')
+    setSellPriceInput('')
+    setWholesalePriceInput('')
+    setStockInput('')
+    setMinStockInput('5')
     setIsModalOpen(true)
   }
 
@@ -104,11 +125,11 @@ export const ProductsView: React.FC = () => {
     setFormCatId(p.category_id)
     setFormUnit(p.unit)
     setFormIsBulk(p.is_bulk)
-    setFormCostPrice(p.cost_price || 0)
-    setFormSellPrice(p.sell_price)
-    setFormWholesalePrice(p.wholesale_price || 0)
-    setFormStock(p.current_stock)
-    setFormMinStock(p.min_stock)
+    setCostPriceInput(p.cost_price ? formatThousandInput(p.cost_price) : '')
+    setSellPriceInput(formatThousandInput(p.sell_price))
+    setWholesalePriceInput(p.wholesale_price ? formatThousandInput(p.wholesale_price) : '')
+    setStockInput(p.current_stock ? (p.is_bulk ? p.current_stock.toString() : formatThousandInput(p.current_stock)) : '')
+    setMinStockInput(p.min_stock !== undefined ? p.min_stock.toString() : '5')
 
     // Load barcodes
     const bcs = await db.barcodes.where('product_id').equals(p.id).toArray()
@@ -131,11 +152,11 @@ export const ProductsView: React.FC = () => {
       category_id: formCatId || categories[0]?.id || 'cat_umum',
       unit: formUnit.trim() || 'pcs',
       is_bulk: formIsBulk,
-      cost_price: formCostPrice,
-      sell_price: formSellPrice,
-      wholesale_price: formWholesalePrice,
-      current_stock: formStock,
-      min_stock: formMinStock,
+      cost_price: parseThousandInput(costPriceInput),
+      sell_price: parseThousandInput(sellPriceInput),
+      wholesale_price: parseThousandInput(wholesalePriceInput),
+      current_stock: parseDecimalInput(stockInput),
+      min_stock: parseDecimalInput(minStockInput) || 5,
       synced: false,
       updated_at: now
     }
@@ -174,10 +195,11 @@ export const ProductsView: React.FC = () => {
     if (!opnameProduct) return
 
     const now = new Date().toISOString()
-    const diff = opnameNewStock - opnameProduct.current_stock
+    const targetStock = parseDecimalInput(opnameStockInput)
+    const diff = targetStock - opnameProduct.current_stock
 
     await db.products.update(opnameProduct.id, {
-      current_stock: opnameNewStock,
+      current_stock: targetStock,
       updated_at: now,
       synced: false
     })
@@ -189,7 +211,7 @@ export const ProductsView: React.FC = () => {
       type: diff >= 0 ? 'in' : 'out',
       quantity: Math.abs(diff),
       ref_type: 'opname',
-      notes: `${opnameReason} (Penyesuaian stok dari ${opnameProduct.current_stock} ke ${opnameNewStock})`,
+      notes: `${opnameReason} (Penyesuaian stok dari ${opnameProduct.current_stock} ke ${targetStock})`,
       synced: false,
       created_at: now
     })
@@ -352,7 +374,7 @@ export const ProductsView: React.FC = () => {
                             type="button"
                             onClick={() => {
                               setOpnameProduct(p)
-                              setOpnameNewStock(p.current_stock)
+                              setOpnameStockInput(p.current_stock.toString())
                               setOpnameReason('Stock Opname Fisik')
                             }}
                             className="btn-ghost btn-sm"
@@ -519,11 +541,12 @@ export const ProductsView: React.FC = () => {
                       Harga Beli / Modal (Rp)
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       className="mono"
-                      value={formCostPrice}
-                      onChange={e => setFormCostPrice(parseInt(e.target.value, 10) || 0)}
+                      placeholder="0"
+                      value={costPriceInput}
+                      onChange={e => setCostPriceInput(formatThousandInput(e.target.value))}
                     />
                   </div>
                   <div>
@@ -531,11 +554,12 @@ export const ProductsView: React.FC = () => {
                       Harga Jual (Rp) *
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       className="mono"
-                      value={formSellPrice}
-                      onChange={e => setFormSellPrice(parseInt(e.target.value, 10) || 0)}
+                      placeholder="0"
+                      value={sellPriceInput}
+                      onChange={e => setSellPriceInput(formatThousandInput(e.target.value))}
                       required
                     />
                   </div>
@@ -547,11 +571,20 @@ export const ProductsView: React.FC = () => {
                       Stok Awal
                     </label>
                     <input
-                      type="number"
-                      step={formIsBulk ? '0.01' : '1'}
+                      type="text"
+                      inputMode={formIsBulk ? 'decimal' : 'numeric'}
                       className="mono"
-                      value={formStock}
-                      onChange={e => setFormStock(parseFloat(e.target.value) || 0)}
+                      placeholder="0"
+                      value={stockInput}
+                      onChange={e => {
+                        const val = e.target.value
+                        if (formIsBulk) {
+                          if (/^[0-9]*[.,]?[0-9]*$/.test(val)) setStockInput(val)
+                        } else {
+                          const digits = val.replace(/\D/g, '')
+                          setStockInput(digits ? parseInt(digits, 10).toLocaleString('id-ID') : '')
+                        }
+                      }}
                     />
                   </div>
                   <div>
@@ -559,11 +592,15 @@ export const ProductsView: React.FC = () => {
                       Batas Stok Menipis (Peringatan)
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       className="mono"
-                      value={formMinStock}
-                      onChange={e => setFormMinStock(parseInt(e.target.value, 10) || 0)}
+                      placeholder="5"
+                      value={minStockInput}
+                      onChange={e => {
+                        const digits = e.target.value.replace(/\D/g, '')
+                        setMinStockInput(digits)
+                      }}
                     />
                   </div>
                 </div>
@@ -618,12 +655,21 @@ export const ProductsView: React.FC = () => {
                     Stok Fisik Sebenarnya ({opnameProduct.unit}) *
                   </label>
                   <input
-                    type="number"
-                    step={opnameProduct.is_bulk ? '0.01' : '1'}
+                    type="text"
+                    inputMode={opnameProduct.is_bulk ? 'decimal' : 'numeric'}
                     className="mono"
                     style={{ fontSize: '1.25rem', fontWeight: 700 }}
-                    value={opnameNewStock}
-                    onChange={e => setOpnameNewStock(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    value={opnameStockInput}
+                    onChange={e => {
+                      const val = e.target.value
+                      if (opnameProduct.is_bulk) {
+                        if (/^[0-9]*[.,]?[0-9]*$/.test(val)) setOpnameStockInput(val)
+                      } else {
+                        const digits = val.replace(/\D/g, '')
+                        setOpnameStockInput(digits ? parseInt(digits, 10).toLocaleString('id-ID') : '')
+                      }
+                    }}
                     required
                     autoFocus
                   />

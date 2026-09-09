@@ -15,18 +15,31 @@ import { formatRupiah } from '../../utils/printer'
 import { generateId } from '../../utils/id'
 import { useAuth } from '../../context/AuthContext'
 
+// Format angka dengan titik ribuan
+function formatThousandInput(val: string | number): string {
+  if (val === '' || val === null || val === undefined) return ''
+  const digits = val.toString().replace(/\D/g, '')
+  if (!digits) return ''
+  return parseInt(digits, 10).toLocaleString('id-ID')
+}
+
+function parseThousandInput(val: string): number {
+  const digits = val.replace(/\D/g, '')
+  return parseInt(digits, 10) || 0
+}
+
 export const CustomersView: React.FC = () => {
   const { storeSetting } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
 
-  // Customer Modal
+  // Modal Customer Form
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [formName, setFormName] = useState('')
   const [formPhone, setFormPhone] = useState('')
   const [formAddress, setFormAddress] = useState('')
-  const [formCreditLimit, setFormCreditLimit] = useState<number>(500000)
+  const [creditLimitInput, setCreditLimitInput] = useState<string>('500.000')
 
   // Payment Debt Modal
   const [payingCustomer, setPayingCustomer] = useState<Customer | null>(null)
@@ -48,7 +61,7 @@ export const CustomersView: React.FC = () => {
     setFormName('')
     setFormPhone('')
     setFormAddress('')
-    setFormCreditLimit(500000)
+    setCreditLimitInput('500.000')
     setIsModalOpen(true)
   }
 
@@ -57,7 +70,7 @@ export const CustomersView: React.FC = () => {
     setFormName(c.name)
     setFormPhone(c.phone || '')
     setFormAddress(c.address || '')
-    setFormCreditLimit(c.credit_limit || 0)
+    setCreditLimitInput(c.credit_limit ? formatThousandInput(c.credit_limit) : '')
     setIsModalOpen(true)
   }
 
@@ -72,7 +85,7 @@ export const CustomersView: React.FC = () => {
       phone: formPhone.trim(),
       address: formAddress.trim(),
       total_debt: editingCustomer ? editingCustomer.total_debt : 0,
-      credit_limit: formCreditLimit,
+      credit_limit: parseThousandInput(creditLimitInput),
       synced: false
     }
 
@@ -366,11 +379,12 @@ export const CustomersView: React.FC = () => {
                     Batas Maksimal Utang / Kredit (Rp)
                   </label>
                   <input
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
                     className="mono"
-                    value={formCreditLimit}
-                    onChange={e => setFormCreditLimit(parseInt(e.target.value, 10) || 0)}
+                    placeholder="0"
+                    value={creditLimitInput}
+                    onChange={e => setCreditLimitInput(formatThousandInput(e.target.value))}
                   />
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     Peringatan akan muncul saat kasir memproses kasbon melebihi limit ini.
